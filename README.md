@@ -2,15 +2,17 @@
 
 ## 概要
 
-本ツールは、Google Generative AI（Gemini）を用いてPDF形式のディスクロージャー資料から「貸借対照表（Balance Sheet）」を自動抽出し、CSVファイルとして出力するPythonスクリプトです。
+本ツールは、Google Generative AI（Gemini）を用いてPDF形式のディスクロージャー資料から「貸借対照表（Balance Sheet）」および「損益計算書（Income Statement）」を自動抽出し、CSVファイルとして出力するPythonスクリプトです。複数のPDFをまとめて処理することもできます。
 
 主な流れは以下のとおりです：
 
 1. ユーザーがPDFファイルをアップロード
 2. Google Generative AI にPDFを渡し、メタデータ（会社名・貸借対照表掲載ページ番号・表の種類・金額単位）を抽出
 3. 同じPDFを再度渡し、貸借対照表そのものの構造化データを抽出
-4. 取得したJSONデータをPydanticモデルで検証・パース
-5. 最も新しい会計年度のデータをCSV形式でエクスポートし、自動的にダウンロード
+4. 同様に損益計算書のデータも抽出
+5. 取得したJSONデータをPydanticモデルで検証・パース
+6. 金額単位に基づいて数値を補正し、最も新しい会計年度のデータをCSV形式でエクスポート
+7. 複数PDFを指定した場合は順に処理し、各PDFごとに1つのCSVを保存
 
 ## 前提条件
 
@@ -58,6 +60,7 @@ for m in models:
 
 - `README.md` - 本リードミー
 - `main_extraction.py`（任意のファイル名） - メタデータ抽出 → 貸借対照表抽出 → CSV出力 → ダウンロード までの全処理をまとめた Python スクリプト
+- `main_extraction.ipynb` - Colab 上で実行しやすいノートブック形式のサンプル
 - `requirements.txt`（任意）
 
 ```
@@ -80,9 +83,7 @@ MODEL_NAME = "gemini-1.5-flash"
 
 ### 2. Colab 環境で実行する場合
 
-1. `main_extraction.py` のコードを Colab のセルに貼り付け、上から順に実行します
-2. 最初に「ファイルをアップロードしてください」と表示されたら、抽出対象の PDF を選択します
-3. 次にメタデータ抽出 → 貸借対照表抽出 が実行され、最後に CSV が生成され自動的にダウンロード画面が開きます
+ノートブック `main_extraction.ipynb` を開き、上から順にセルを実行してください。適宜 API キーを入力し、PDF ファイルをアップロードすると、メタデータ取得・貸借対照表抽出・損益計算書抽出ののち CSV が生成されます。
 
 ### 3. ローカル環境で実行する場合
 
@@ -98,7 +99,7 @@ MODEL_NAME = "gemini-1.5-flash"
    Windows の場合は `set GOOGLE_API_KEY=YOUR_API_KEY_HERE`
 4. スクリプトを実行：
    ```bash
-   python main_extraction.py
+   python main_extraction.py your1.pdf your2.pdf
    ```
 
 実行すると、ターミナル上に「ファイルをアップロードしてください」的な表示は出ませんので、あらかじめスクリプト内の `uploaded = google.colab.files.upload()` などの Colab 専用コード部を削除し、手動でファイルパスを `uploaded_pdf_local_path` にセットするなどの改修が必要です。
