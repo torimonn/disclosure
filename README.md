@@ -42,7 +42,7 @@ Google Generative AI（Gemini）を利用するには、Google Cloud Console で
 
 ### 3. モデル名を確認
 
-スクリプト中で利用するモデル名（`gemini-1.5-flash` など）は、最新の利用可能なモデル名に置き換える必要があります。
+スクリプト内の `MODEL_NAME` には、利用可能な最新モデル名（例:`gemini-2.5-flash-preview-05-20`）を指定してください。
 
 実行前に以下のコードを使って、サポートされているモデル名一覧を確認してください：
 
@@ -79,7 +79,7 @@ pandas
 
 ```python
 # 例: 利用モデル名を指定
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 ```
 
 ### 2. Colab 環境で実行する場合
@@ -108,19 +108,12 @@ MODEL_NAME = "gemini-1.5-flash"
    python main_extraction.py your1.pdf your2.pdf
    ```
 
-実行すると、ターミナル上に「ファイルをアップロードしてください」的な表示は出ませんので、あらかじめスクリプト内の `uploaded = google.colab.files.upload()` などの Colab 専用コード部を削除し、手動でファイルパスを `uploaded_pdf_local_path` にセットするなどの改修が必要です。
-
-例：
-```python
-uploaded_pdf_local_path = "/path/to/disclo_2024keisu.pdf"
-```
-
 ## スクリプトの流れ詳細
 
 ### 1. アップロード処理
 
-- **Colab**：`google.colab.files.upload()` でUIを表示し、PDFをアップロード
-- **ローカル**：あらかじめファイルパスを変数に直接指定しておく
+- **Colab**：`google.colab.files.upload()` でPDFを選択
+- **ローカル**：スクリプト実行時の引数として PDF パスを渡す
 
 ### 2. PDFメタデータ抽出
 
@@ -136,9 +129,9 @@ uploaded_pdf_local_path = "/path/to/disclo_2024keisu.pdf"
 
 ### 4. CSV 出力＆ダウンロード
 
-- 関数 `export_financials_to_csv()` により、最新会計年度の `end_date` を 2 行目・B 列に、会社名を 1 行目・B 列にセット。3 行目に貸借対照表ページ番号、4 行目に損益計算書ページ番号を書き込み、5 行目以降では貸借対照表項目の後に損益計算書項目を続けて並べます。金額は各表の単位を掛け合わせて円換算した値を保存します
-- CSV は2列構成です。出力ファイル名は PDF 名を元に自動で決定されます
-- Colab 上では `files.download()` で自動的にダウンロードが始まります
+`build_financial_rows()` で取り出した行データを DataFrame にまとめ、`financials.csv` として保存します。複数PDFを指定した場合も 1 つの CSV に連結されます。
+出力は2列（科目、金額(円)）で、1 行目には会社名、2 行目には決算期、続けてページ番号や明細が並びます。
+Colab 上では `files.download()` を利用すればブラウザからダウンロードできます。
 
 ### 5. クリーンアップ
 
@@ -159,13 +152,13 @@ PDF のレイアウトによっては、LLM が正しくテーブル構造を認
 
 ### 3. CSV フォーマット
 
-- 1 行目：A列 空白、B列 会社名
-- 2 行目：A列 空白、B列 会計年度末日（YYYY-MM-DD）
-- 3 行目：A列 空白、B列 貸借対照表ページ番号（カンマ区切り）
-- 4 行目：A列 空白、B列 損益計算書ページ番号（カンマ区切り）
-- 5 行目以降：A列 勘定科目、B列 金額（円）
-- 抽出した `balance_sheet_amount_unit` または `income_statement_amount_unit` を掛け合わせた後の値を保存します。金額が `null` の場合は空文字として出力します
-- 例: PDF に「(単位：百万円)」と記載されていた場合、CSV では値が 1,000,000 を掛けた後の円額で保存されます
+- 1 行目：「金庫名」に会社名を記録
+- 2 行目：「決算期」に会計年度末日（YYYY-MM-DD）を記録
+- 3 行目：「貸借対照表記載ページ」にページ番号（カンマ区切り）を記録
+- 4 行目：「損益計算書記載ページ」にページ番号（カンマ区切り）を記録
+- 5 行目以降：勘定科目名と金額(円)を順番に並べます
+- 金額は `balance_sheet_amount_unit` や `income_statement_amount_unit` で補正した後の値を保存します。値が `null` の場合は空欄となります
+- 例として「(単位：百万円)」とある場合は 1,000,000 倍して円換算した金額が出力されます
 
 ## トラブルシューティング
 
@@ -179,8 +172,8 @@ PDF のレイアウトによっては、LLM が正しくテーブル構造を認
 
 ### CSV が生成できない / ダウンロードが始まらない
 
-- Colab 環境以外では `files.download()` は機能しません。ローカル実行時は手動で `output_path` の場所を確認し、ファイルをダウンロードしてください
-- 保存先ディレクトリが存在しない場合は、`export_financials_to_csv()` 内で別のパス（例：`./balance_sheet.csv`）を指定してください
+- Colab 環境以外では `files.download()` は機能しません。ローカル実行時は手動で `financials.csv` を取得してください
+- 保存先ディレクトリが存在しない場合は、スクリプト中の出力パス(`financials.csv`)を変更してください
 
 ### PDF アップロード／削除でエラーが出る
 
@@ -195,11 +188,11 @@ PDF のレイアウトによっては、LLM が正しくテーブル構造を認
 
 ### 子項目のインデントを可視化したい
 
-`flatten_items()` で単にタプルを展開する代わりに、勘定科目名の前にスペースを挿入することでインデントを表現できます（例：`" " * item.indent_level + item.name_japanese`）。
+`build_financial_rows()` 内のフラット化処理を変更し、勘定科目名の前にスペースを挿入することでインデントを表現できます（例：`" " * item.indent_level + item.name_japanese`）。
 
 ### 英語名カラムを追加したい
 
-`export_financials_to_csv()` 内でデータ行を `(item.name_japanese, item.name_english, item.value)` のようにタプルを増やし、DataFrame の列を `["勘定科目（日本語）","勘定科目（英語）","金額"]` という3列構成に変更すれば CSV に英語欄を追加できます。
+`build_financial_rows()` で取得した行データを加工し、列数を増やした DataFrame を作成すれば、CSV に英語名カラムを追加できます。
 
 ## ライセンス・著作権
 
