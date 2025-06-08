@@ -84,7 +84,12 @@ MODEL_NAME = "gemini-1.5-flash"
 
 ### 2. Colab 環境で実行する場合
 
-ノートブック `main_extraction.ipynb` を開き、上から順にセルを実行してください。適宜 API キーを入力し、PDF ファイルをアップロードすると、メタデータ取得・貸借対照表抽出・損益計算書抽出ののち CSV が生成されます。
+ノートブック `main_extraction.ipynb` を開き、上から順に以下のセルを実行します。
+
+1. **ライブラリのインストール**：`pip install` セルで必要パッケージを準備
+2. **API キー設定**：`google.colab.userdata` から `GOOGLE_API_KEY` を読み込み `genai.configure` を実行
+3. **PDF アップロード**：`files.upload()` セルで処理したい PDF を選択
+4. **処理実行**：最後のセルを実行すると、各 PDF からメタデータと財務諸表を抽出して CSV がダウンロードされます
 
 ### 3. ローカル環境で実行する場合
 
