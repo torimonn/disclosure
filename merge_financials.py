@@ -17,9 +17,9 @@ def read_financial_csv(path: str) -> pd.DataFrame:
     # 2列目1行目が金庫名
     column_name = df.iloc[0, 1]
 
-    # 5行目以降が勘定科目データ
-    data = df.iloc[4:].copy().reset_index(drop=True)
-    data.rename(columns={'金額(円)': column_name}, inplace=True)
+    # 5行目以降の最初の2列のみを使用
+    data = df.iloc[4:, :2].copy().reset_index(drop=True)
+    data.columns = ['科目', column_name]
     return data
 
 
