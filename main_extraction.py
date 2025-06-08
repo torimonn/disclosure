@@ -163,25 +163,31 @@ def export_financials_to_csv(
     pl_pages_str = ",".join(str(p) for p in pl_pages) if pl_pages else ""
 
     rows = []
-    rows.append(("", company_name, "", ""))
-    rows.append(("", latest_bs.end_date.strftime("%Y-%m-%d"), "", ""))
+    # 1 行目: 会社名
+    rows.append(("", company_name))
+    # 2 行目: 会計年度末日
+    rows.append(("", latest_bs.end_date.strftime("%Y-%m-%d")))
+    # 3 行目: 貸借対照表ページ番号
+    rows.append(("", bs_pages_str))
+    # 4 行目: 損益計算書ページ番号
+    rows.append(("", pl_pages_str))
 
-    def flatten(items, dst, bs_page: str, pl_page: str):
+    def flatten(items, dst):
         for it in items:
-            dst.append((it.name_japanese, it.value if it.value is not None else "", bs_page, pl_page))
+            dst.append((it.name_japanese, it.value if it.value is not None else ""))
             if it.children:
-                flatten(it.children, dst, bs_page, pl_page)
+                flatten(it.children, dst)
 
-    rows.append(("-- 貸借対照表 --", "", "", ""))
-    flatten(latest_bs.assets.items, rows, bs_pages_str, "")
-    flatten(latest_bs.liabilities.items, rows, bs_pages_str, "")
-    flatten(latest_bs.net_assets.items, rows, bs_pages_str, "")
+    rows.append(("-- 貸借対照表 --", ""))
+    flatten(latest_bs.assets.items, rows)
+    flatten(latest_bs.liabilities.items, rows)
+    flatten(latest_bs.net_assets.items, rows)
 
-    rows.append(("", "", "", ""))
-    rows.append(("-- 損益計算書 --", "", "", ""))
-    flatten(latest_pl.items, rows, "", pl_pages_str)
+    rows.append(("", ""))
+    rows.append(("-- 損益計算書 --", ""))
+    flatten(latest_pl.items, rows)
 
-    df = pd.DataFrame(rows, columns=["科目", "金額(円)", "貸借対照表ページ", "損益計算書ページ"])
+    df = pd.DataFrame(rows, columns=["科目", "金額(円)"])
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
     print(f"CSVを保存しました: {output_path}")
 
