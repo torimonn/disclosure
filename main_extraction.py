@@ -141,7 +141,7 @@ def multiply_unit(items: List[StatementItem], amount_unit: int):
         if it.children:
             multiply_unit(it.children, amount_unit)
 
-def export_financials_to_csv(
+def build_financial_rows(
     balance_sheet_resp: BalanceSheetResponse,
     income_statement_resp: IncomeStatementResponse,
     company_name: str,
@@ -149,11 +149,13 @@ def export_financials_to_csv(
     pl_unit: int,
     bs_pages: Optional[List[int]],
     pl_pages: Optional[List[int]],
-    output_path: str,
-):
+) -> List[tuple]:
+    """貸借対照表・損益計算書をCSV 1ブロック分の行データに変換する"""
+    # 直近期のみを使用
     latest_bs = balance_sheet_resp.balance_sheet.fiscal_year_data[0]
     latest_pl = income_statement_resp.income_statement.fiscal_year_data[0]
 
+    # 金額単位を補正
     multiply_unit(latest_bs.assets.items, bs_unit)
     multiply_unit(latest_bs.liabilities.items, bs_unit)
     multiply_unit(latest_bs.net_assets.items, bs_unit)
@@ -162,15 +164,12 @@ def export_financials_to_csv(
     bs_pages_str = ",".join(str(p) for p in bs_pages) if bs_pages else ""
     pl_pages_str = ",".join(str(p) for p in pl_pages) if pl_pages else ""
 
-    rows = []
-    # 1 行目: 会社名
-    rows.append(("", company_name))
-    # 2 行目: 会計年度末日
-    rows.append(("", latest_bs.end_date.strftime("%Y-%m-%d")))
-    # 3 行目: 貸借対照表ページ番号
-    rows.append(("", bs_pages_str))
-    # 4 行目: 損益計算書ページ番号
-    rows.append(("", pl_pages_str))
+    rows: List[tuple] = []
+    # 1 行目はヘッダーとして後段で付与するので、ここでは 2 行目以降を構築
+    rows.append(("金庫名", company_name))
+    rows.append(("決算期", latest_bs.end_date.strftime("%Y-%m-%d")))
+    rows.append(("貸借対照表記載ページ", bs_pages_str))
+    rows.append(("損益計算書記載ページ", pl_pages_str))
 
     def flatten(items, dst):
         for it in items:
@@ -179,23 +178,28 @@ def export_financials_to_csv(
                 flatten(it.children, dst)
 
     rows.append(("-- 貸借対照表 --", ""))
+    if latest_bs.assets.total_value is not None:
+        rows.append(("資産合計", latest_bs.assets.total_value))
     flatten(latest_bs.assets.items, rows)
+    if latest_bs.liabilities.total_value is not None:
+        rows.append(("負債合計", latest_bs.liabilities.total_value))
     flatten(latest_bs.liabilities.items, rows)
+    if latest_bs.net_assets.total_value is not None:
+        rows.append(("純資産合計", latest_bs.net_assets.total_value))
     flatten(latest_bs.net_assets.items, rows)
 
     rows.append(("", ""))
     rows.append(("-- 損益計算書 --", ""))
     flatten(latest_pl.items, rows)
 
-    df = pd.DataFrame(rows, columns=["科目", "金額(円)"])
-    df.to_csv(output_path, index=False, encoding="utf-8-sig")
-    print(f"CSVを保存しました: {output_path}")
+    return rows
 
-def process_pdf(pdf_path: str):
+def process_pdf(pdf_path: str) -> Optional[List[tuple]]:
+    """PDF 1 ファイルを処理し、CSV 行データのリストを返す"""
     print(f"処理開始: {pdf_path}")
     uploaded = upload_pdf_to_genai(pdf_path)
     if not uploaded:
-        return
+        return None
     schema_meta = PDFMetadata.model_json_schema()
     meta_parts = create_generative_content_parts_for_metadata(uploaded, schema_meta)
     metadata: Optional[PDFMetadata] = call_llm_for_structured_output(meta_parts, PDFMetadata)
@@ -205,7 +209,7 @@ def process_pdf(pdf_path: str):
         pass
     if not metadata:
         print("メタデータの取得に失敗しました")
-        return
+        return None
 
     company_jp = metadata.company_name_japanese
     company_en = metadata.company_name_english or company_jp
@@ -230,7 +234,7 @@ def process_pdf(pdf_path: str):
         pass
     if not bs_resp:
         print("貸借対照表の取得に失敗しました")
-        return
+        return None
 
     # Income Statement
     uploaded_pl = upload_pdf_to_genai(pdf_path)
@@ -244,10 +248,9 @@ def process_pdf(pdf_path: str):
         pass
     if not pl_resp:
         print("損益計算書の取得に失敗しました")
-        return
+        return None
 
-    output_csv = os.path.splitext(os.path.basename(pdf_path))[0] + ".csv"
-    export_financials_to_csv(
+    rows = build_financial_rows(
         bs_resp,
         pl_resp,
         company_jp,
@@ -255,8 +258,8 @@ def process_pdf(pdf_path: str):
         pl_unit,
         pages_bs_list,
         pages_pl_list,
-        output_csv,
     )
+    return rows
 
 
 def main():
@@ -269,8 +272,22 @@ def main():
     if len(sys.argv) < 2:
         print("PDFファイルを指定してください")
         return
+    all_rows: List[tuple] = []
     for pdf_path in sys.argv[1:]:
-        process_pdf(pdf_path)
+        rows = process_pdf(pdf_path)
+        if rows:
+            if all_rows:
+                all_rows.append(("", ""))  # 区切りの空行
+            all_rows.extend(rows)
+
+    if not all_rows:
+        print("処理結果がありません")
+        return
+
+    df = pd.DataFrame(all_rows, columns=["科目", "金額(円)"])
+    output_path = "financials.csv"
+    df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"CSVを保存しました: {output_path}")
 
 if __name__ == "__main__":
     main()
