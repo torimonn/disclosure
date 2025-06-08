@@ -2,15 +2,18 @@
 
 ## 概要
 
-本ツールは、Google Generative AI（Gemini）を用いてPDF形式のディスクロージャー資料から「貸借対照表（Balance Sheet）」を自動抽出し、CSVファイルとして出力するPythonスクリプトです。
+本ツールは、Google Generative AI（Gemini）を用いてPDF形式のディスクロージャー資料から「貸借対照表（Balance Sheet）」および「損益計算書（Income Statement）」を自動抽出し、CSVファイルとして出力するPythonスクリプトです。複数のPDFをまとめて処理することもできます。
 
 主な流れは以下のとおりです：
 
 1. ユーザーがPDFファイルをアップロード
-2. Google Generative AI にPDFを渡し、メタデータ（会社名・貸借対照表掲載ページ番号・表の種類・金額単位）を抽出
+2. Google Generative AI にPDFを渡し、メタデータ（会社名・貸借対照表掲載ページ番号・表の種類・貸借対照表の金額単位・損益計算書の金額単位）を抽出
 3. 同じPDFを再度渡し、貸借対照表そのものの構造化データを抽出
-4. 取得したJSONデータをPydanticモデルで検証・パース
-5. 最も新しい会計年度のデータをCSV形式でエクスポートし、自動的にダウンロード
+4. 同様に損益計算書のデータも抽出
+5. 取得したJSONデータをPydanticモデルで検証・パース
+6. 各表の金額単位に基づいて数値を補正し、貸借対照表→損益計算書の順に一列へまとめ
+   つつ2列目の3行目に貸借対照表ページ、4行目に損益計算書ページを記録したCSVを生成
+7. 複数PDFを指定した場合は順に処理し、各PDFごとに1つのCSVを保存
 
 ## 前提条件
 
@@ -58,6 +61,7 @@ for m in models:
 
 - `README.md` - 本リードミー
 - `main_extraction.py`（任意のファイル名） - メタデータ抽出 → 貸借対照表抽出 → CSV出力 → ダウンロード までの全処理をまとめた Python スクリプト
+- `main_extraction.ipynb` - Colab 上で実行しやすいノートブック形式のサンプル
 - `requirements.txt`（任意）
 
 ```
@@ -80,9 +84,12 @@ MODEL_NAME = "gemini-1.5-flash"
 
 ### 2. Colab 環境で実行する場合
 
-1. `main_extraction.py` のコードを Colab のセルに貼り付け、上から順に実行します
-2. 最初に「ファイルをアップロードしてください」と表示されたら、抽出対象の PDF を選択します
-3. 次にメタデータ抽出 → 貸借対照表抽出 が実行され、最後に CSV が生成され自動的にダウンロード画面が開きます
+ノートブック `main_extraction.ipynb` を開き、上から順に以下のセルを実行します。
+
+1. **ライブラリのインストール**：`pip install` セルで必要パッケージを準備
+2. **API キー設定**：`google.colab.userdata` から `GOOGLE_API_KEY` を読み込み `genai.configure` を実行
+3. **PDF アップロード**：`files.upload()` セルで処理したい PDF を選択
+4. **処理実行**：最後のセルを実行すると、各 PDF からメタデータと財務諸表を抽出して CSV がダウンロードされます
 
 ### 3. ローカル環境で実行する場合
 
@@ -98,7 +105,7 @@ MODEL_NAME = "gemini-1.5-flash"
    Windows の場合は `set GOOGLE_API_KEY=YOUR_API_KEY_HERE`
 4. スクリプトを実行：
    ```bash
-   python main_extraction.py
+   python main_extraction.py your1.pdf your2.pdf
    ```
 
 実行すると、ターミナル上に「ファイルをアップロードしてください」的な表示は出ませんので、あらかじめスクリプト内の `uploaded = google.colab.files.upload()` などの Colab 専用コード部を削除し、手動でファイルパスを `uploaded_pdf_local_path` にセットするなどの改修が必要です。
@@ -119,7 +126,7 @@ uploaded_pdf_local_path = "/path/to/disclo_2024keisu.pdf"
 
 - 関数 `upload_pdf_to_genai(pdf_file_path)` で PDF を Google Generative AI サービスにアップロード
 - `create_generative_content_parts_for_metadata()` で LLM 指示文とファイルをまとめ、`call_llm_for_structured_output(..., output_model=PDFMetadata)` で実行
-- `PDFMetadata` モデルにマッチしていれば成功し、会社名・貸借対照表掲載ページ番号・表の種類・金額単位(amount_unit)を取得
+- `PDFMetadata` モデルにマッチしていれば成功し、会社名・貸借対照表掲載ページ番号・表の種類・貸借対照表の金額単位(`balance_sheet_amount_unit`)・損益計算書の金額単位(`income_statement_amount_unit`)を取得
 
 ### 3. 貸借対照表抽出
 
@@ -129,9 +136,9 @@ uploaded_pdf_local_path = "/path/to/disclo_2024keisu.pdf"
 
 ### 4. CSV 出力＆ダウンロード
 
-- 関数 `export_balance_sheet_to_csv()` により、最新会計年度の `end_date` を 2 行目・B 列に、会社名を 1 行目・B 列にセットし、3 行目以降で勘定科目と金額を (amount_unit で指定された値を掛け合わせて円換算した上で) 出力
-- 出力先は `/content/balance_sheet.csv` に固定（Colab 環境）
-- `files.download()` を呼び出して、自動的にブラウザダウンロードを開始
+- 関数 `export_financials_to_csv()` により、最新会計年度の `end_date` を 2 行目・B 列に、会社名を 1 行目・B 列にセット。3 行目に貸借対照表ページ番号、4 行目に損益計算書ページ番号を書き込み、5 行目以降では貸借対照表項目の後に損益計算書項目を続けて並べます。金額は各表の単位を掛け合わせて円換算した値を保存します
+- CSV は2列構成です。出力ファイル名は PDF 名を元に自動で決定されます
+- Colab 上では `files.download()` で自動的にダウンロードが始まります
 
 ### 5. クリーンアップ
 
@@ -154,8 +161,10 @@ PDF のレイアウトによっては、LLM が正しくテーブル構造を認
 
 - 1 行目：A列 空白、B列 会社名
 - 2 行目：A列 空白、B列 会計年度末日（YYYY-MM-DD）
-- 3 行目以降：A列 勘定科目、B列 金額（円）。抽出した `amount_unit` を乗算し円換算した値を出力し、子項目はインデントレベルにかかわらず縦に並べます
-- 金額が `null` の場合は空文字として出力します
+- 3 行目：A列 空白、B列 貸借対照表ページ番号（カンマ区切り）
+- 4 行目：A列 空白、B列 損益計算書ページ番号（カンマ区切り）
+- 5 行目以降：A列 勘定科目、B列 金額（円）
+- 抽出した `balance_sheet_amount_unit` または `income_statement_amount_unit` を掛け合わせた後の値を保存します。金額が `null` の場合は空文字として出力します
 - 例: PDF に「(単位：百万円)」と記載されていた場合、CSV では値が 1,000,000 を掛けた後の円額で保存されます
 
 ## トラブルシューティング
@@ -171,7 +180,7 @@ PDF のレイアウトによっては、LLM が正しくテーブル構造を認
 ### CSV が生成できない / ダウンロードが始まらない
 
 - Colab 環境以外では `files.download()` は機能しません。ローカル実行時は手動で `output_path` の場所を確認し、ファイルをダウンロードしてください
-- 保存先ディレクトリが存在しない場合は、`export_balance_sheet_to_csv()` 内で別のパス（例：`./balance_sheet.csv`）を指定してください
+- 保存先ディレクトリが存在しない場合は、`export_financials_to_csv()` 内で別のパス（例：`./balance_sheet.csv`）を指定してください
 
 ### PDF アップロード／削除でエラーが出る
 
@@ -190,7 +199,7 @@ PDF のレイアウトによっては、LLM が正しくテーブル構造を認
 
 ### 英語名カラムを追加したい
 
-`export_balance_sheet_to_csv()` 内でデータ行を `(item.name_japanese, item.name_english, item.value)` のようにタプルを増やし、DataFrame の列を `["勘定科目（日本語）","勘定科目（英語）","金額"]` という3列構成に変更すれば CSV に英語欄を追加できます。
+`export_financials_to_csv()` 内でデータ行を `(item.name_japanese, item.name_english, item.value)` のようにタプルを増やし、DataFrame の列を `["勘定科目（日本語）","勘定科目（英語）","金額"]` という3列構成に変更すれば CSV に英語欄を追加できます。
 
 ## ライセンス・著作権
 
