@@ -7,11 +7,11 @@
 主な流れは以下のとおりです：
 
 1. ユーザーがPDFファイルをアップロード
-2. Google Generative AI にPDFを渡し、メタデータ（会社名・貸借対照表掲載ページ番号・表の種類・金額単位）を抽出
+2. Google Generative AI にPDFを渡し、メタデータ（会社名・貸借対照表掲載ページ番号・表の種類・貸借対照表の金額単位・損益計算書の金額単位）を抽出
 3. 同じPDFを再度渡し、貸借対照表そのものの構造化データを抽出
 4. 同様に損益計算書のデータも抽出
 5. 取得したJSONデータをPydanticモデルで検証・パース
-6. 金額単位に基づいて数値を補正し、最も新しい会計年度のデータをCSV形式でエクスポート
+6. 各表の金額単位に基づいて数値を補正し、最も新しい会計年度のデータをCSV形式でエクスポート
 7. 複数PDFを指定した場合は順に処理し、各PDFごとに1つのCSVを保存
 
 ## 前提条件
@@ -120,7 +120,7 @@ uploaded_pdf_local_path = "/path/to/disclo_2024keisu.pdf"
 
 - 関数 `upload_pdf_to_genai(pdf_file_path)` で PDF を Google Generative AI サービスにアップロード
 - `create_generative_content_parts_for_metadata()` で LLM 指示文とファイルをまとめ、`call_llm_for_structured_output(..., output_model=PDFMetadata)` で実行
-- `PDFMetadata` モデルにマッチしていれば成功し、会社名・貸借対照表掲載ページ番号・表の種類・金額単位(amount_unit)を取得
+- `PDFMetadata` モデルにマッチしていれば成功し、会社名・貸借対照表掲載ページ番号・表の種類・貸借対照表の金額単位(`balance_sheet_amount_unit`)・損益計算書の金額単位(`income_statement_amount_unit`)を取得
 
 ### 3. 貸借対照表抽出
 
@@ -130,7 +130,7 @@ uploaded_pdf_local_path = "/path/to/disclo_2024keisu.pdf"
 
 ### 4. CSV 出力＆ダウンロード
 
-- 関数 `export_balance_sheet_to_csv()` により、最新会計年度の `end_date` を 2 行目・B 列に、会社名を 1 行目・B 列にセットし、3 行目以降で勘定科目と金額を (amount_unit で指定された値を掛け合わせて円換算した上で) 出力
+- 関数 `export_financials_to_csv()` により、最新会計年度の `end_date` を 2 行目・B 列に、会社名を 1 行目・B 列にセットし、3 行目以降で勘定科目と金額を (それぞれ `balance_sheet_amount_unit` と `income_statement_amount_unit` で指定された値を掛け合わせて円換算した上で) 出力
 - 出力先は `/content/balance_sheet.csv` に固定（Colab 環境）
 - `files.download()` を呼び出して、自動的にブラウザダウンロードを開始
 
@@ -155,7 +155,7 @@ PDF のレイアウトによっては、LLM が正しくテーブル構造を認
 
 - 1 行目：A列 空白、B列 会社名
 - 2 行目：A列 空白、B列 会計年度末日（YYYY-MM-DD）
-- 3 行目以降：A列 勘定科目、B列 金額（円）。抽出した `amount_unit` を乗算し円換算した値を出力し、子項目はインデントレベルにかかわらず縦に並べます
+- 3 行目以降：A列 勘定科目、B列 金額（円）。抽出した `balance_sheet_amount_unit` もしくは `income_statement_amount_unit` を乗算し円換算した値を出力し、子項目はインデントレベルにかかわらず縦に並べます
 - 金額が `null` の場合は空文字として出力します
 - 例: PDF に「(単位：百万円)」と記載されていた場合、CSV では値が 1,000,000 を掛けた後の円額で保存されます
 
@@ -172,7 +172,7 @@ PDF のレイアウトによっては、LLM が正しくテーブル構造を認
 ### CSV が生成できない / ダウンロードが始まらない
 
 - Colab 環境以外では `files.download()` は機能しません。ローカル実行時は手動で `output_path` の場所を確認し、ファイルをダウンロードしてください
-- 保存先ディレクトリが存在しない場合は、`export_balance_sheet_to_csv()` 内で別のパス（例：`./balance_sheet.csv`）を指定してください
+- 保存先ディレクトリが存在しない場合は、`export_financials_to_csv()` 内で別のパス（例：`./balance_sheet.csv`）を指定してください
 
 ### PDF アップロード／削除でエラーが出る
 
@@ -191,7 +191,7 @@ PDF のレイアウトによっては、LLM が正しくテーブル構造を認
 
 ### 英語名カラムを追加したい
 
-`export_balance_sheet_to_csv()` 内でデータ行を `(item.name_japanese, item.name_english, item.value)` のようにタプルを増やし、DataFrame の列を `["勘定科目（日本語）","勘定科目（英語）","金額"]` という3列構成に変更すれば CSV に英語欄を追加できます。
+`export_financials_to_csv()` 内でデータ行を `(item.name_japanese, item.name_english, item.value)` のようにタプルを増やし、DataFrame の列を `["勘定科目（日本語）","勘定科目（英語）","金額"]` という3列構成に変更すれば CSV に英語欄を追加できます。
 
 ## ライセンス・著作権
 

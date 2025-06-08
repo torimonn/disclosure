@@ -12,14 +12,15 @@ import pandas as pd
 MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 
 class PDFMetadata(BaseModel):
-    """PDFから抽出するメタデータ。金額単位も含む"""
+    """PDFから抽出するメタデータ。貸借対照表と損益計算書で金額単位を別々に保持"""
     company_name_japanese: str = Field(description="会社名（日本語）")
     company_name_english: Optional[str] = Field(default=None, description="会社名（英語）")
     balance_sheet_pages_1_indexed: List[int] = Field(description="貸借対照表ページ番号リスト")
     income_statement_pages_1_indexed: Optional[List[int]] = Field(default=None, description="損益計算書ページ番号リスト")
     estimated_balance_sheet_type: Optional[str] = Field(default=None, description="貸借対照表の種類推定")
     estimated_income_statement_type: Optional[str] = Field(default=None, description="損益計算書の種類推定")
-    amount_unit: int = Field(description="金額単位。百万円なら1000000等")
+    balance_sheet_amount_unit: int = Field(description="貸借対照表の金額単位。百万円なら1000000等")
+    income_statement_amount_unit: Optional[int] = Field(default=None, description="損益計算書の金額単位。百万円なら1000000等")
 
 class StatementItem(BaseModel):
     name_japanese: str
@@ -81,7 +82,11 @@ def extract_text_from_pdf_pypdf(pdf_file_path: str, pages_0_indexed: Optional[Li
 
 def create_generative_content_parts_for_metadata(uploaded_pdf_file: genai.protos.FileData, pydantic_schema: dict) -> List[Union[str, genai.protos.FileData]]:
     schema_json = json.dumps(pydantic_schema, ensure_ascii=False, indent=2)
-    instruction = f"""提供されたPDFから会社名、貸借対照表ページ、損益計算書ページ、表の種類、金額単位を抽出してください。出力はJSONのみとし、スキーマは次の通りです:\n{schema_json}"""
+    instruction = (
+        "PDF から会社名、貸借対照表ページ、損益計算書ページ、表の種類、" 
+        "貸借対照表用の金額単位、損益計算書用の金額単位を抽出してください。" 
+        "出力はJSONのみで、スキーマは次の通りです:\n" + schema_json
+    )
     return [instruction, uploaded_pdf_file]
 
 def create_generative_content_parts_for_balance_sheet(uploaded_pdf_file: genai.protos.FileData, company_name_japanese: str, company_name_english: str, pydantic_schema: dict, auxiliary_pdf_text: Optional[str] = None) -> List[Union[str, genai.protos.FileData]]:
@@ -136,14 +141,14 @@ def multiply_unit(items: List[StatementItem], amount_unit: int):
         if it.children:
             multiply_unit(it.children, amount_unit)
 
-def export_financials_to_csv(balance_sheet_resp: BalanceSheetResponse, income_statement_resp: IncomeStatementResponse, company_name: str, amount_unit: int, output_path: str):
+def export_financials_to_csv(balance_sheet_resp: BalanceSheetResponse, income_statement_resp: IncomeStatementResponse, company_name: str, bs_unit: int, pl_unit: int, output_path: str):
     latest_bs = balance_sheet_resp.balance_sheet.fiscal_year_data[0]
     latest_pl = income_statement_resp.income_statement.fiscal_year_data[0]
 
-    multiply_unit(latest_bs.assets.items, amount_unit)
-    multiply_unit(latest_bs.liabilities.items, amount_unit)
-    multiply_unit(latest_bs.net_assets.items, amount_unit)
-    multiply_unit(latest_pl.items, amount_unit)
+    multiply_unit(latest_bs.assets.items, bs_unit)
+    multiply_unit(latest_bs.liabilities.items, bs_unit)
+    multiply_unit(latest_bs.net_assets.items, bs_unit)
+    multiply_unit(latest_pl.items, pl_unit)
 
     rows = []
     rows.append(("", company_name))
@@ -186,7 +191,8 @@ def process_pdf(pdf_path: str):
 
     company_jp = metadata.company_name_japanese
     company_en = metadata.company_name_english or company_jp
-    amount_unit = metadata.amount_unit
+    bs_unit = metadata.balance_sheet_amount_unit
+    pl_unit = metadata.income_statement_amount_unit or bs_unit
 
     pages_bs = [p-1 for p in metadata.balance_sheet_pages_1_indexed] if metadata.balance_sheet_pages_1_indexed else None
     pages_pl = [p-1 for p in metadata.income_statement_pages_1_indexed] if metadata.income_statement_pages_1_indexed else None
@@ -220,7 +226,7 @@ def process_pdf(pdf_path: str):
         return
 
     output_csv = os.path.splitext(os.path.basename(pdf_path))[0] + ".csv"
-    export_financials_to_csv(bs_resp, pl_resp, company_jp, amount_unit, output_csv)
+    export_financials_to_csv(bs_resp, pl_resp, company_jp, bs_unit, pl_unit, output_csv)
 
 
 def main():
