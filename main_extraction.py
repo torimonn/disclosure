@@ -141,7 +141,16 @@ def multiply_unit(items: List[StatementItem], amount_unit: int):
         if it.children:
             multiply_unit(it.children, amount_unit)
 
-def export_financials_to_csv(balance_sheet_resp: BalanceSheetResponse, income_statement_resp: IncomeStatementResponse, company_name: str, bs_unit: int, pl_unit: int, output_path: str):
+def export_financials_to_csv(
+    balance_sheet_resp: BalanceSheetResponse,
+    income_statement_resp: IncomeStatementResponse,
+    company_name: str,
+    bs_unit: int,
+    pl_unit: int,
+    bs_pages: Optional[List[int]],
+    pl_pages: Optional[List[int]],
+    output_path: str,
+):
     latest_bs = balance_sheet_resp.balance_sheet.fiscal_year_data[0]
     latest_pl = income_statement_resp.income_statement.fiscal_year_data[0]
 
@@ -150,26 +159,29 @@ def export_financials_to_csv(balance_sheet_resp: BalanceSheetResponse, income_st
     multiply_unit(latest_bs.net_assets.items, bs_unit)
     multiply_unit(latest_pl.items, pl_unit)
 
+    bs_pages_str = ",".join(str(p) for p in bs_pages) if bs_pages else ""
+    pl_pages_str = ",".join(str(p) for p in pl_pages) if pl_pages else ""
+
     rows = []
-    rows.append(("", company_name))
-    rows.append(("", latest_bs.end_date.strftime("%Y-%m-%d")))
+    rows.append(("", company_name, "", ""))
+    rows.append(("", latest_bs.end_date.strftime("%Y-%m-%d"), "", ""))
 
-    def flatten(items, dst):
+    def flatten(items, dst, bs_page: str, pl_page: str):
         for it in items:
-            dst.append((it.name_japanese, it.value if it.value is not None else ""))
+            dst.append((it.name_japanese, it.value if it.value is not None else "", bs_page, pl_page))
             if it.children:
-                flatten(it.children, dst)
+                flatten(it.children, dst, bs_page, pl_page)
 
-    rows.append(("-- 貸借対照表 --", ""))
-    flatten(latest_bs.assets.items, rows)
-    flatten(latest_bs.liabilities.items, rows)
-    flatten(latest_bs.net_assets.items, rows)
+    rows.append(("-- 貸借対照表 --", "", "", ""))
+    flatten(latest_bs.assets.items, rows, bs_pages_str, "")
+    flatten(latest_bs.liabilities.items, rows, bs_pages_str, "")
+    flatten(latest_bs.net_assets.items, rows, bs_pages_str, "")
 
-    rows.append(("", ""))
-    rows.append(("-- 損益計算書 --", ""))
-    flatten(latest_pl.items, rows)
+    rows.append(("", "", "", ""))
+    rows.append(("-- 損益計算書 --", "", "", ""))
+    flatten(latest_pl.items, rows, "", pl_pages_str)
 
-    df = pd.DataFrame(rows, columns=["科目", "金額(円)"])
+    df = pd.DataFrame(rows, columns=["科目", "金額(円)", "貸借対照表ページ", "損益計算書ページ"])
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
     print(f"CSVを保存しました: {output_path}")
 
@@ -194,8 +206,11 @@ def process_pdf(pdf_path: str):
     bs_unit = metadata.balance_sheet_amount_unit
     pl_unit = metadata.income_statement_amount_unit or bs_unit
 
-    pages_bs = [p-1 for p in metadata.balance_sheet_pages_1_indexed] if metadata.balance_sheet_pages_1_indexed else None
-    pages_pl = [p-1 for p in metadata.income_statement_pages_1_indexed] if metadata.income_statement_pages_1_indexed else None
+    pages_bs_list = metadata.balance_sheet_pages_1_indexed or []
+    pages_pl_list = metadata.income_statement_pages_1_indexed or []
+
+    pages_bs = [p - 1 for p in pages_bs_list] if pages_bs_list else None
+    pages_pl = [p - 1 for p in pages_pl_list] if pages_pl_list else None
 
     # Balance Sheet
     uploaded_bs = upload_pdf_to_genai(pdf_path)
@@ -226,7 +241,16 @@ def process_pdf(pdf_path: str):
         return
 
     output_csv = os.path.splitext(os.path.basename(pdf_path))[0] + ".csv"
-    export_financials_to_csv(bs_resp, pl_resp, company_jp, bs_unit, pl_unit, output_csv)
+    export_financials_to_csv(
+        bs_resp,
+        pl_resp,
+        company_jp,
+        bs_unit,
+        pl_unit,
+        pages_bs_list,
+        pages_pl_list,
+        output_csv,
+    )
 
 
 def main():
